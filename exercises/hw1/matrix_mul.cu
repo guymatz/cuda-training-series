@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include "utils.cuh"
 
 // these are just for timing measurments
 #include <time.h>
@@ -17,21 +18,39 @@
     } while (0)
 
 
-const int DSIZE = 4096;
+//const int DSIZE = 4096;
+const int DSIZE = 3*1024;
+//const int DSIZE = 8;
 const int block_size = 16;  // CUDA maximum is 1024 *total* threads in block
 const float A_val = 1.0f;
 const float B_val = 2.0f;
+
+// matrix add (naive) kernel: C = A + B
+__global__ void madd(const float *A, const float *B, float *C, int ds) {
+
+  int idx = threadIdx.x+blockDim.x*blockIdx.x; // create thread x index
+  int idy = threadIdx.y+blockDim.y*blockIdx.y; // create thread y index
+  //printf("idx: %i: idy: %i\n", idx, idy);
+
+  if ((idx < ds) && (idy < ds)){
+    C[idy*ds+idx] = A[idy*ds+idx] + B[idy*ds+idx] ;
+  }
+}
 
 // matrix multiply (naive) kernel: C = A * B
 __global__ void mmul(const float *A, const float *B, float *C, int ds) {
 
   int idx = threadIdx.x+blockDim.x*blockIdx.x; // create thread x index
   int idy = threadIdx.y+blockDim.y*blockIdx.y; // create thread y index
+  //printf("idx: %i: idy: %i\n", idx, idy);
 
   if ((idx < ds) && (idy < ds)){
     float temp = 0;
-    for (int i = 0; i < ds; i++)
-      temp += A[FIXME*ds+i] * B[i*ds+FIXME];   // dot product of row and column
+    for (int i = 0; i < ds; i++) {
+      temp += A[idy*ds+i] * B[i*ds+idx];   // dot product of row and column
+	}
+	if (idx > 0 && idy > 0 && idx*idy % 100000 == 0)
+		printf("i: %i\n", idx * idy);
     C[idy*ds+idx] = temp;
   }
 }
@@ -56,6 +75,9 @@ int main(){
     h_B[i] = B_val;
     h_C[i] = 0;}
 
+  print_matrix(h_A, DSIZE, 4);
+  print_matrix(h_B, DSIZE, 4);
+
   // Initialization timing
   t1 = clock();
   t1sum = ((double)(t1-t0))/CLOCKS_PER_SEC;
@@ -76,12 +98,16 @@ int main(){
   dim3 block(block_size, block_size);  // dim3 variable holds 3 dimensions
   dim3 grid((DSIZE+block.x-1)/block.x, (DSIZE+block.y-1)/block.y);
   mmul<<<grid, block>>>(d_A, d_B, d_C, DSIZE);
+  //madd<<<grid, block>>>(d_A, d_B, d_C, DSIZE);
   cudaCheckErrors("kernel launch failure");
 
   // Cuda processing sequence step 2 is complete
 
   // Copy results back to host
   cudaMemcpy(h_C, d_C, DSIZE*DSIZE*sizeof(float), cudaMemcpyDeviceToHost);
+  //print_matrix(h_A, DSIZE, 4);
+  //print_matrix(h_B, DSIZE, 4);
+  print_matrix(h_C, DSIZE, 4);
 
   // GPU timing
   t2 = clock();
@@ -92,6 +118,7 @@ int main(){
 
   // Verify results
   cudaCheckErrors("kernel execution failure or cudaMemcpy H2D failure");
+  printf ("NOT Done . . .\n");
   for (int i = 0; i < DSIZE*DSIZE; i++) if (h_C[i] != A_val*B_val*DSIZE) {printf("mismatch at index %d, was: %f, should be: %f\n", i, h_C[i], A_val*B_val*DSIZE); return -1;}
   printf("Success!\n"); 
 
